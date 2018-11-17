@@ -14,36 +14,6 @@ def hard_update(target, source):
     for target_param, param in zip(target.parameters(), source.parameters()):
         target_param.data.copy_(param.data)
 
-"""
-From: https://github.com/pytorch/pytorch/issues/1959
-There's an official LayerNorm implementation in pytorch now, but it hasn't been included in 
-pip version yet. This is a temporary version
-This slows down training by a bit
-"""
-class LayerNorm(nn.Module):
-    def __init__(self, num_features, eps=1e-5, affine=True):
-        super(LayerNorm, self).__init__()
-        self.num_features = num_features
-        self.affine = affine
-        self.eps = eps
-
-        if self.affine:
-            self.gamma = nn.Parameter(torch.Tensor(num_features).uniform_())
-            self.beta = nn.Parameter(torch.zeros(num_features))
-
-    def forward(self, x):
-        shape = [-1] + [1] * (x.dim() - 1)
-        mean = x.view(x.size(0), -1).mean(1).view(*shape)
-        std = x.view(x.size(0), -1).std(1).view(*shape)
-
-        y = (x - mean) / (std + self.eps)
-        if self.affine:
-            shape = [1, -1] + [1] * (x.dim() - 2)
-            y = self.gamma.view(*shape) * y + self.beta.view(*shape)
-        return y
-
-#nn.LayerNorm = LayerNorm
-
 
 class Actor(nn.Module):
     def __init__(self, hidden_size, num_inputs, num_outputs):
@@ -98,14 +68,15 @@ class Critic(nn.Module):
         return V
 
 class Agent(object):
-    def __init__(self, gamma, tau, hidden_size, num_inputs, num_outputs):
+    def __init__(self, action_bound, gamma, tau, hidden_size, num_inputs, num_outputs):
 
         self.num_inputs = num_inputs
+        self.action_bound = action_bound
 
         self.actor = Actor(hidden_size, self.num_inputs, num_outputs)
         self.actor_target = Actor(hidden_size, self.num_inputs, num_outputs)
         self.actor_perturbed = Actor(hidden_size, self.num_inputs, num_outputs)
-        self.actor_optim = Adam(self.actor.parameters(), lr=1e-4)
+        self.actor_optim = Adam(self.actor.parameters(), lr=1e-3)
 
         self.critic = Critic(hidden_size, self.num_inputs, num_outputs)
         self.critic_target = Critic(hidden_size, self.num_inputs, num_outputs)
@@ -131,15 +102,15 @@ class Agent(object):
         if action_noise is not None:
             mu += torch.Tensor(action_noise.noise())
 
-        return mu.clamp(-1, 1)
+        return mu.clamp(-self.action_bound, self.action_bound)
 
 
     def train(self, batch):
-        state_batch = Variable(torch.cat(batch.state))
-        action_batch = Variable(torch.cat(batch.action))
-        reward_batch = Variable(torch.cat(batch.reward))
-        mask_batch = Variable(torch.cat(batch.mask))
-        next_state_batch = Variable(torch.cat(batch.next_state))
+        state_batch = Variable(torch.FloatTensor(batch.state))
+        action_batch = Variable(torch.FloatTensor(batch.action))
+        reward_batch = Variable(torch.FloatTensor(batch.reward))
+        mask_batch = Variable(torch.FloatTensor(batch.mask))
+        next_state_batch = Variable(torch.FloatTensor(batch.next_state))
         
         next_action_batch = self.actor_target(next_state_batch)
         next_state_action_values = self.critic_target(next_state_batch, next_action_batch)
