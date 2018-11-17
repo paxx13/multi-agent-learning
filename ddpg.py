@@ -1,4 +1,5 @@
 import sys
+import os
 
 import torch
 import torch.nn as nn
@@ -40,6 +41,7 @@ class Actor(nn.Module):
         mu = torch.tanh(self.mu(x))
         return mu
 
+        
 class Critic(nn.Module):
     def __init__(self, hidden_size, num_inputs, num_outputs):
         super(Critic, self).__init__()
@@ -67,6 +69,7 @@ class Critic(nn.Module):
         V = self.V(x)
         return V
 
+        
 class Agent(object):
     def __init__(self, action_bound, gamma, tau, hidden_size, num_inputs, num_outputs):
 
@@ -75,7 +78,6 @@ class Agent(object):
 
         self.actor = Actor(hidden_size, self.num_inputs, num_outputs)
         self.actor_target = Actor(hidden_size, self.num_inputs, num_outputs)
-        self.actor_perturbed = Actor(hidden_size, self.num_inputs, num_outputs)
         self.actor_optim = Adam(self.actor.parameters(), lr=1e-3)
 
         self.critic = Critic(hidden_size, self.num_inputs, num_outputs)
@@ -89,12 +91,9 @@ class Agent(object):
         hard_update(self.critic_target, self.critic)
 
 
-    def select_action(self, state, action_noise=None, param_noise=None):
+    def select_action(self, state, action_noise=None):
         self.actor.eval()
-        if param_noise is not None: 
-            mu = self.actor_perturbed((Variable(torch.Tensor(state))))
-        else:
-            mu = self.actor((Variable(torch.Tensor(state))))
+        mu = self.actor((Variable(torch.Tensor(state))))
             
         self.actor.train()
         mu = mu.data
@@ -139,16 +138,6 @@ class Agent(object):
         soft_update(self.critic_target, self.critic, self.tau)
 
         return value_loss.item(), policy_loss.item()
-
-    def perturb_actor_parameters(self, param_noise):
-        """Apply parameter noise to actor model, for exploration"""
-        hard_update(self.actor_perturbed, self.actor)
-        params = self.actor_perturbed.state_dict()
-        for name in params:
-            if 'ln' in name: 
-                pass 
-            param = params[name]
-            param += torch.randn(param.shape) * param_noise.current_stddev
 
     def save_model(self, env_name, suffix="", actor_path=None, critic_path=None):
         if not os.path.exists('models/'):
