@@ -21,12 +21,17 @@ class Actor(nn.Module):
         super(Actor, self).__init__()
 
         self.linear1 = nn.Linear(num_inputs, hidden_size)
+        torch.nn.init.xavier_normal_(self.linear1.weight, 0.1)
+        self.linear1.bias.data.mul_(0.1)
         self.ln1 = nn.LayerNorm(hidden_size)
 
         self.linear2 = nn.Linear(hidden_size, hidden_size)
+        torch.nn.init.xavier_normal_(self.linear2.weight, 0.1)
+        self.linear2.bias.data.mul_(0.1)
         self.ln2 = nn.LayerNorm(hidden_size)
 
         self.mu = nn.Linear(hidden_size, num_outputs)
+        torch.nn.init.xavier_normal_(self.mu.weight, 0.1)
         self.mu.weight.data.mul_(0.1)
         self.mu.bias.data.mul_(0.1)
 
@@ -47,13 +52,17 @@ class Critic(nn.Module):
         super(Critic, self).__init__()
 
         self.linear1 = nn.Linear(num_inputs, hidden_size)
+        torch.nn.init.xavier_normal_(self.linear1.weight, 0.1)
+        self.linear1.bias.data.mul_(0.1)
         self.ln1 = nn.LayerNorm(hidden_size)
 
         self.linear2 = nn.Linear(hidden_size+num_outputs, hidden_size)
-        self.ln2 = nn.LayerNorm(hidden_size)
+        torch.nn.init.xavier_normal_(self.linear2.weight, 0.1)
+        self.linear2.bias.data.mul_(0.1)
+        self.ln2 = nn.LayerNorm(hidden_size)        
 
         self.V = nn.Linear(hidden_size, 1)
-        self.V.weight.data.mul_(0.1)
+        torch.nn.init.xavier_normal_(self.V.weight, 0.1)
         self.V.bias.data.mul_(0.1)
 
     def forward(self, inputs, actions):
@@ -67,7 +76,7 @@ class Critic(nn.Module):
         x = self.ln2(x)
         x = F.relu(x)
         V = self.V(x)
-        return V
+        return torch.sigmoid(V)
 
         
 class Agent(object):
@@ -78,7 +87,7 @@ class Agent(object):
 
         self.actor = Actor(hidden_size, self.num_inputs, num_outputs)
         self.actor_target = Actor(hidden_size, self.num_inputs, num_outputs)
-        self.actor_optim = Adam(self.actor.parameters(), lr=1e-3)
+        self.actor_optim = Adam(self.actor.parameters(), lr=1e-4)
 
         self.critic = Critic(hidden_size, self.num_inputs, num_outputs)
         self.critic_target = Critic(hidden_size, self.num_inputs, num_outputs)
@@ -101,7 +110,7 @@ class Agent(object):
         if action_noise is not None:
             mu += torch.Tensor(action_noise.noise())
 
-        return mu.clamp(-self.action_bound, self.action_bound)
+        return torch.autograd.Variable(mu, requires_grad=False)* self.action_bound
 
 
     def train(self, batch):
@@ -124,6 +133,7 @@ class Agent(object):
 
         value_loss = F.mse_loss(state_action_batch, expected_state_action_batch)
         value_loss.backward()
+        nn.utils.clip_grad_norm_(self.critic.parameters(), 0.1)
         self.critic_optim.step()
 
         self.actor_optim.zero_grad()
@@ -132,6 +142,7 @@ class Agent(object):
 
         policy_loss = policy_loss.mean()
         policy_loss.backward()
+        nn.utils.clip_grad_norm_(self.actor.parameters(), 0.1)
         self.actor_optim.step()
 
         soft_update(self.actor_target, self.actor, self.tau)
