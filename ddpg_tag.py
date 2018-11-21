@@ -13,7 +13,6 @@ from ounoise import OUNoise
 from ddpg import Agent
 from replay_memory import ReplayMemory, Transition
 from make_env import make_env
-import simple_tag_utilities
 
 MAX_STEPS = 100
 MAX_EPISODES = 100000
@@ -52,9 +51,8 @@ def train(env, agents, ounoise, memories):
         episode_rewards = np.zeros(num_agents)        
         episode_vlosses = np.zeros(num_agents)       
         episode_plosses = np.zeros(num_agents)
-        collision_count = np.zeros(num_agents)
         for i in range(num_agents):
-            ounoise[i].scale = 1#(NOISE_SCALE) * max(0, 5000 - episode) / 5000 + 0.001
+            ounoise[i].scale = (NOISE_SCALE) * max(0, 5000 - episode) / 5000 + 0.001
             ounoise[i].reset() 
 
         for steps in range(MAX_STEPS):
@@ -62,8 +60,6 @@ def train(env, agents, ounoise, memories):
             # act
             actions = []
             for i in range(num_agents):
-                
-                #action = np.clip(agents[i].select_action(states[i], ounoise[i]), -2, 2)
                 action = agents[i].select_action(states[i], action_noise=ounoise[i])
                 actions.append(action.squeeze(0).numpy())
             
@@ -71,12 +67,12 @@ def train(env, agents, ounoise, memories):
                         
             # step
             states_next, rewards, done, _ = env.step(actions)
-
+            '''
             for act in range(len(action)):
                 writer.add_scalar('actions/agent0_action'+str(act),  actions[0][act], episode*MAX_STEPS +steps)
                 
             writer.add_scalar('rewards/agent0_detailed_reward',  rewards[0], episode*MAX_STEPS +steps)
-            
+            '''
             # learn
             v_loss, p_loss = train_agents(agents, memories, states, actions, rewards, states_next, done)
 
@@ -85,7 +81,6 @@ def train(env, agents, ounoise, memories):
             episode_rewards += rewards
             episode_vlosses += v_loss
             episode_plosses += p_loss
-            collision_count += np.array(simple_tag_utilities.count_agent_collisions(env))
 
             # reset states if done
             if any(done) or steps==MAX_STEPS-1:
@@ -97,8 +92,7 @@ def train(env, agents, ounoise, memories):
                 for a in range(num_agents):
                     writer.add_scalar('rewards/agent'+str(a),    episode_rewards[a],   episode)
                     writer.add_scalar('vlosses/agent'+str(a),    episode_vlosses[a],   episode)
-                    writer.add_scalar('plosses/agent'+str(a),    episode_plosses[a],   episode)
-                    writer.add_scalar('collisions/agent'+str(a), collision_count[a],   episode)                   
+                    writer.add_scalar('plosses/agent'+str(a),    episode_plosses[a],   episode)                 
                     writer.add_scalar('exploration/agent'+str(a)+' scale', ounoise[a].scale, episode)
                     
                 break 
@@ -133,7 +127,7 @@ def play(env, agents):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()    
     parser.add_argument('-t', '--train', help='set to learn a policy', action="store_true")
-    parser.add_argument('--env', default='simple_tag_guided_2v1', type=str)
+    parser.add_argument('--env', default='simple', type=str)
     parser.add_argument('--memory_size', default=1000000, type=int)
     args = parser.parse_args()
 
@@ -151,7 +145,7 @@ if __name__ == '__main__':
     for i in range(env.n):
         n_action = env.action_space[i].n
         state_size = env.observation_space[i].shape[0]
-        speed = 0.8 if env.agents[i].adversary else 1
+        speed = 1#0.8 if env.agents[i].adversary else 1
 
         agents.append(Agent(speed, GAMMA, TAU, 50, state_size, n_action) )
         noise.append(OUNoise(n_action))

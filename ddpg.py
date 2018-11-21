@@ -1,6 +1,7 @@
 import sys
 import os
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.optim import Adam
@@ -76,7 +77,7 @@ class Critic(nn.Module):
         x = self.ln2(x)
         x = F.relu(x)
         V = self.V(x)
-        return torch.sigmoid(V)
+        return torch.tanh(V)
 
         
 class Agent(object):
@@ -116,6 +117,8 @@ class Agent(object):
     def train(self, batch):
         state_batch = Variable(torch.FloatTensor(batch.state))
         action_batch = Variable(torch.FloatTensor(batch.action))
+        # normalize rewards
+        rewards = (batch.reward - np.array(batch.reward).mean()) / np.array(batch.reward).std()
         reward_batch = Variable(torch.FloatTensor(batch.reward))
         mask_batch = Variable(torch.FloatTensor(batch.mask))
         next_state_batch = Variable(torch.FloatTensor(batch.next_state))
@@ -123,7 +126,8 @@ class Agent(object):
         next_action_batch = self.actor_target(next_state_batch)
         next_state_action_values = self.critic_target(next_state_batch, next_action_batch)
 
-        reward_batch = reward_batch.unsqueeze(1)
+        reward_batch = reward_batch.unsqueeze(1)        
+        
         mask_batch = mask_batch.unsqueeze(1)
         expected_state_action_batch = reward_batch + (self.gamma * mask_batch * next_state_action_values)
 
