@@ -10,12 +10,15 @@ import time
 from tensorboardX import SummaryWriter
 
 from ounoise import OUNoise
-from ddpg import Agent
+from maddpg import Agent
 from replay_memory import ReplayMemory, Transition
 from make_env import make_env
 
+
+from collections import namedtuple
+
 MAX_STEPS = 100
-MAX_EPISODES = 100000
+MAX_EPISODES = 20000
 GAMMA = 0.96
 TAU = 0.01
 NOISE_SCALE = 0.1
@@ -23,20 +26,43 @@ NOISE_SCALE = 0.1
 BATCH_SIZE=64
 
 
-def train_agents(agents, memories, states, actions, rewards, states_next, done, batch_size=BATCH_SIZE):
+def train_agents(agents, memories, batch_size=BATCH_SIZE):                    
     num_agents = len(agents)
     v_loss = np.zeros(num_agents)
     p_loss = np.zeros(num_agents)
-    for i in range(num_agents):
-        if done[i]:
-            rewards[i] -= 10
 
-        memories[i].push(states[i], actions[i], rewards[i], states_next[i], not done[i])
-
-        if memories[i].position > batch_size * 10:
-           transitions = memories[i].sample(batch_size)
-           batch = Transition(*zip(*transitions))
-           v_loss[i], p_loss[i] = agents[i].train(batch)
+    size = memories[0].position
+    
+    # start training once enough data is available 
+    if size > batch_size * 10:        
+        batch = random.sample(range(size), batch_size)    
+        s_n = []
+        a_n = []
+        sn_n = []
+        an_n = []
+        pi_acts_n = []
+    
+        # create training data for critics with states and actions of each agent
+        for i in range(num_agents):
+            transition = memories[i].sample(batch)
+            transition = Transition(*zip(*transition))
+            
+            s_n.append(transition.states)
+            a_n.append(transition.actions)            
+            sn_n.append(transition.next_states)
+            an_n.append(agents[i].select_action(transition.next_states))
+            pi_acts_n.append(agents[i].select_action(transition.states))
+            
+        s_n = np.concatenate(s_n, axis=1)
+        a_n = np.concatenate(a_n, axis=1)
+        sn_n = np.concatenate(sn_n, axis=1)        
+        an_n = np.concatenate(an_n, axis=1)
+        
+        # train each agent
+        for i in range(num_agents):
+            transition = memories[i].sample(batch)
+            transition = Transition(*zip(*transition))
+            v_loss[i], p_loss[i] = agents[i].train(i, s_n, a_n, sn_n, an_n, transition, pi_acts_n)
             
     return v_loss, p_loss
 
@@ -51,6 +77,7 @@ def train(env, agents, ounoise, memories):
         episode_rewards = np.zeros(num_agents)        
         episode_vlosses = np.zeros(num_agents)       
         episode_plosses = np.zeros(num_agents)
+        
         for i in range(num_agents):
             ounoise[i].scale = (NOISE_SCALE) * max(0, 5000 - episode) / 5000 + 0.001
             ounoise[i].reset() 
@@ -61,20 +88,19 @@ def train(env, agents, ounoise, memories):
             actions = []
             for i in range(num_agents):
                 action = agents[i].select_action(states[i], action_noise=ounoise[i])
-                actions.append(action.squeeze(0).numpy())
+                actions.append(action.squeeze(0).numpy())            
             
-            
-                        
             # step
             states_next, rewards, done, _ = env.step(actions)
-            '''
-            for act in range(len(action)):
-                writer.add_scalar('actions/agent0_action'+str(act),  actions[0][act], episode*MAX_STEPS +steps)
+            
+            # save experiences
+            for i in range(num_agents):
+                if done[i]:
+                    rewards[i] -= 10
+                memories[i].push(states[i], actions[i], rewards[i], states_next[i], done[i])
                 
-            writer.add_scalar('rewards/agent0_detailed_reward',  rewards[0], episode*MAX_STEPS +steps)
-            '''
             # learn
-            v_loss, p_loss = train_agents(agents, memories, states, actions, rewards, states_next, done)
+            v_loss, p_loss = train_agents(agents, memories)
 
             states = states_next
             
@@ -89,6 +115,7 @@ def train(env, agents, ounoise, memories):
                     episode_vlosses = episode_vlosses / steps
                     episode_plosses = episode_plosses / steps
                 
+                # logging
                 for a in range(num_agents):
                     writer.add_scalar('rewards/agent'+str(a),    episode_rewards[a],   episode)
                     writer.add_scalar('vlosses/agent'+str(a),    episode_vlosses[a],   episode)
@@ -127,7 +154,7 @@ def play(env, agents):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()    
     parser.add_argument('-t', '--train', help='set to learn a policy', action="store_true")
-    parser.add_argument('--env', default='simple', type=str)
+    parser.add_argument('--env', default='simple_tag_guided_1v2', type=str)
     parser.add_argument('--memory_size', default=1000000, type=int)
     args = parser.parse_args()
 
@@ -139,15 +166,26 @@ if __name__ == '__main__':
     random.seed(2)
     np.random.seed(2)
 
+    # define the size of the input dimensions for the centralized critics (information from all agents)
+    critic_in_size = 0
+    critic_act_size = 0
+    
+    for i in range(env.n):
+        critic_in_size += env.observation_space[i].shape[0]
+        critic_act_size += env.action_space[i].n
+
+
+    # create agents, replay buffers and exploration noise
     agents = []
     noise = []
-    memories = []
+    memories = []    
+    
     for i in range(env.n):
         n_action = env.action_space[i].n
         state_size = env.observation_space[i].shape[0]
-        speed = 1#0.8 if env.agents[i].adversary else 1
+        speed = 0.8 if env.agents[i].adversary else 1
 
-        agents.append(Agent(speed, GAMMA, TAU, 50, state_size, n_action) )
+        agents.append(Agent(speed, GAMMA, TAU, 50, state_size, n_action, critic_in_size, critic_act_size) )
         noise.append(OUNoise(n_action))
         memories.append(ReplayMemory(args.memory_size))
 
@@ -157,11 +195,7 @@ if __name__ == '__main__':
         except (KeyboardInterrupt, SystemExit):
             print('trainig aborted')
         
-        for agent in agents:
-            agent.save_model(args.env, actor_path="models/ddpg_actor", critic_path="models/ddpg_critic")
         pickle.dump(agents, open('./models/agents_'+args.env+'.obj', "wb" ) )
     else:
-        #for agent in agents:
-            #agent.load_model("models/ddpg_actor", "models/ddpg_critic")
         agents =  pickle.load(open('./models/agents_'+args.env+'.obj', "rb")) 
         play(env, agents)

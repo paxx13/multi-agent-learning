@@ -1,6 +1,3 @@
-import sys
-import os
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -47,9 +44,9 @@ class Actor(nn.Module):
         mu = torch.tanh(self.mu(x))
         return mu
 
-        
+
 class Critic(nn.Module):
-    def __init__(self, hidden_size, num_inputs, num_outputs):
+    def __init__(self, hidden_size, num_inputs, num_actions):
         super(Critic, self).__init__()
 
         self.linear1 = nn.Linear(num_inputs, hidden_size)
@@ -57,7 +54,7 @@ class Critic(nn.Module):
         self.linear1.bias.data.mul_(0.1)
         self.ln1 = nn.LayerNorm(hidden_size)
 
-        self.linear2 = nn.Linear(hidden_size+num_outputs, hidden_size)
+        self.linear2 = nn.Linear(hidden_size+num_actions, hidden_size)
         torch.nn.init.xavier_normal_(self.linear2.weight, 0.1)
         self.linear2.bias.data.mul_(0.1)
         self.ln2 = nn.LayerNorm(hidden_size)        
@@ -77,11 +74,11 @@ class Critic(nn.Module):
         x = self.ln2(x)
         x = F.relu(x)
         V = self.V(x)
-        return torch.tanh(V)
+        return V
 
-        
+
 class Agent(object):
-    def __init__(self, action_bound, gamma, tau, hidden_size, num_inputs, num_outputs):
+    def __init__(self, action_bound, gamma, tau, hidden_size, num_inputs, num_outputs, critic_in_size, critic_act_size):
 
         self.num_inputs = num_inputs
         self.action_bound = action_bound
@@ -90,8 +87,8 @@ class Agent(object):
         self.actor_target = Actor(hidden_size, self.num_inputs, num_outputs)
         self.actor_optim = Adam(self.actor.parameters(), lr=1e-4)
 
-        self.critic = Critic(hidden_size, self.num_inputs, num_outputs)
-        self.critic_target = Critic(hidden_size, self.num_inputs, num_outputs)
+        self.critic = Critic(hidden_size, critic_in_size, critic_act_size)
+        self.critic_target = Critic(hidden_size, critic_in_size, critic_act_size)
         self.critic_optim = Adam(self.critic.parameters(), lr=1e-3)
 
         self.gamma = gamma
@@ -103,8 +100,9 @@ class Agent(object):
 
     def select_action(self, state, action_noise=None):
         self.actor.eval()
-        mu = self.actor((Variable(torch.Tensor(state))))
-            
+
+        mu = self.actor(torch.FloatTensor(state))
+
         self.actor.train()
         mu = mu.data
 
@@ -114,16 +112,14 @@ class Agent(object):
         return torch.autograd.Variable(mu, requires_grad=False)* self.action_bound
 
 
-    def train(self, batch):
-        state_batch = Variable(torch.FloatTensor(batch.state))
-        action_batch = Variable(torch.FloatTensor(batch.action))
-        # normalize rewards
-        rewards = (batch.reward - np.array(batch.reward).mean()) / np.array(batch.reward).std()
-        reward_batch = Variable(torch.FloatTensor(batch.reward))
-        mask_batch = Variable(torch.FloatTensor(batch.mask))
-        next_state_batch = Variable(torch.FloatTensor(batch.next_state))
+    def train(self, idx, s, a, sn, an, transition, pi_n):
+        state_batch = Variable(torch.FloatTensor(s))
+        action_batch = Variable(torch.FloatTensor(a))
+        reward_batch = Variable(torch.FloatTensor(transition.rewards))
+        mask_batch = Variable(torch.FloatTensor(1-np.asarray(transition.dones)))
+        next_state_batch = Variable(torch.FloatTensor(sn))
         
-        next_action_batch = self.actor_target(next_state_batch)
+        next_action_batch = Variable(torch.FloatTensor(an))
         next_state_action_values = self.critic_target(next_state_batch, next_action_batch)
 
         reward_batch = reward_batch.unsqueeze(1)        
@@ -131,6 +127,7 @@ class Agent(object):
         mask_batch = mask_batch.unsqueeze(1)
         expected_state_action_batch = reward_batch + (self.gamma * mask_batch * next_state_action_values)
 
+        # train critic
         self.critic_optim.zero_grad()
 
         state_action_batch = self.critic((state_batch), (action_batch))
@@ -140,35 +137,27 @@ class Agent(object):
         nn.utils.clip_grad_norm_(self.critic.parameters(), 0.1)
         self.critic_optim.step()
 
+        # train actor
         self.actor_optim.zero_grad()
 
-        policy_loss = -self.critic((state_batch),self.actor((state_batch)))
+        pol_action_batch = []
+
+        for pi in range(len(pi_n)):
+            if pi == idx:
+                pol_action_batch.append(self.actor(torch.FloatTensor(transition.states)))
+            else:
+                pol_action_batch.append(pi_n[idx])
+
+        policy_loss = -self.critic( (state_batch), torch.cat(pol_action_batch, dim=1) )
 
         policy_loss = policy_loss.mean()
         policy_loss.backward()
         nn.utils.clip_grad_norm_(self.actor.parameters(), 0.1)
         self.actor_optim.step()
 
+        # update parameters
         soft_update(self.actor_target, self.actor, self.tau)
         soft_update(self.critic_target, self.critic, self.tau)
 
         return value_loss.item(), policy_loss.item()
-
-    def save_model(self, env_name, suffix="", actor_path=None, critic_path=None):
-        if not os.path.exists('models/'):
-            os.makedirs('models/')
-
-        if actor_path is None:
-            actor_path = "models/ddpg_actor_{}_{}".format(env_name, suffix) 
-        if critic_path is None:
-            critic_path = "models/ddpg_critic_{}_{}".format(env_name, suffix) 
-        print('Saving models to {} and {}'.format(actor_path, critic_path))
-        torch.save(self.actor.state_dict(), actor_path)
-        torch.save(self.critic.state_dict(), critic_path)
-
-    def load_model(self, actor_path, critic_path):
-        print('Loading models from {} and {}'.format(actor_path, critic_path))
-        if actor_path is not None:
-            self.actor.load_state_dict(torch.load(actor_path))
-        if critic_path is not None: 
-            self.critic.load_state_dict(torch.load(critic_path))
+  

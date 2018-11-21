@@ -1,11 +1,10 @@
 import random
 from collections import namedtuple
 
-# Taken from
+# modified version of
 # https://github.com/pytorch/tutorials/blob/master/Reinforcement%20(Q-)Learning%20with%20PyTorch.ipynb
 
-Transition = namedtuple(
-    'Transition', ('state', 'action', 'mask', 'next_state', 'reward'))
+Transition = namedtuple('Transition', ('states', 'actions', 'rewards', 'next_states', 'dones'))
 
 
 class ReplayMemory(object):
@@ -22,8 +21,8 @@ class ReplayMemory(object):
         self.memory[self.position] = Transition(*args)
         self.position = (self.position + 1) % self.capacity
 
-    def sample(self, batch_size):
-        return random.sample(self.memory, batch_size)
+    def sample(self, batch):
+        return [self.memory[i]for i in batch]
 
     def __len__(self):
         return len(self.memory)
