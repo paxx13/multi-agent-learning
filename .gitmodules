@@ -1,0 +1,3 @@
+[submodule "multiagent_envs"]
+	path = multiagent_envs
+	url = https://github.com/openai/multiagent-particle-envs

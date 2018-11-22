@@ -78,10 +78,9 @@ class Critic(nn.Module):
 
 
 class Agent(object):
-    def __init__(self, action_bound, gamma, tau, hidden_size, num_inputs, num_outputs, critic_in_size, critic_act_size):
+    def __init__(self, gamma, tau, hidden_size, num_inputs, num_outputs, critic_in_size, critic_act_size):
 
         self.num_inputs = num_inputs
-        self.action_bound = action_bound
 
         self.actor = Actor(hidden_size, self.num_inputs, num_outputs)
         self.actor_target = Actor(hidden_size, self.num_inputs, num_outputs)
@@ -109,7 +108,7 @@ class Agent(object):
         if action_noise is not None:
             mu += torch.Tensor(action_noise.noise())
 
-        return torch.autograd.Variable(mu, requires_grad=False)* self.action_bound
+        return mu
 
 
     def train(self, idx, s, a, sn, an, transition, pi_n):
@@ -118,11 +117,11 @@ class Agent(object):
         reward_batch = Variable(torch.FloatTensor(transition.rewards))
         mask_batch = Variable(torch.FloatTensor(1-np.asarray(transition.dones)))
         next_state_batch = Variable(torch.FloatTensor(sn))
-        
+
         next_action_batch = Variable(torch.FloatTensor(an))
         next_state_action_values = self.critic_target(next_state_batch, next_action_batch)
 
-        reward_batch = reward_batch.unsqueeze(1)        
+        reward_batch = reward_batch.unsqueeze(1)
         
         mask_batch = mask_batch.unsqueeze(1)
         expected_state_action_batch = reward_batch + (self.gamma * mask_batch * next_state_action_values)

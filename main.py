@@ -12,36 +12,39 @@ from tensorboardX import SummaryWriter
 from ounoise import OUNoise
 from maddpg import Agent
 from replay_memory import ReplayMemory, Transition
-from make_env import make_env
+from multiagent_envs.make_env import make_env
 
 
 from collections import namedtuple
 
 MAX_STEPS = 100
-MAX_EPISODES = 20000
+MAX_EPISODES = 10000
 GAMMA = 0.96
 TAU = 0.01
-NOISE_SCALE = 0.1
+
+EXPLORE_NOISE_START = 0.1
+EXPLORE_NOISE_FINAL = 0.001
+EXPLORE_EPISODES = MAX_EPISODES  * 0.2
 
 BATCH_SIZE=64
 
 
-def train_agents(agents, memories, batch_size=BATCH_SIZE):                    
+def train_agents(agents, memories, batch_size=BATCH_SIZE):
     num_agents = len(agents)
     v_loss = np.zeros(num_agents)
     p_loss = np.zeros(num_agents)
 
     size = memories[0].position
-    
+
     # start training once enough data is available 
     if size > batch_size * 10:        
-        batch = random.sample(range(size), batch_size)    
+        batch = random.sample(range(size), batch_size)
         s_n = []
         a_n = []
         sn_n = []
         an_n = []
         pi_acts_n = []
-    
+
         # create training data for critics with states and actions of each agent
         for i in range(num_agents):
             transition = memories[i].sample(batch)
@@ -69,17 +72,18 @@ def train_agents(agents, memories, batch_size=BATCH_SIZE):
 
 def train(env, agents, ounoise, memories):
     num_agents = len(agents)
-    
+
     writer = SummaryWriter(comment="-multiagent")  
-        
+
     for episode in trange(MAX_EPISODES):
         states = env.reset()
-        episode_rewards = np.zeros(num_agents)        
-        episode_vlosses = np.zeros(num_agents)       
+        episode_rewards = np.zeros(num_agents)
+        episode_vlosses = np.zeros(num_agents)
         episode_plosses = np.zeros(num_agents)
-        
+
+        # decay exploration noise
         for i in range(num_agents):
-            ounoise[i].scale = (NOISE_SCALE) * max(0, 5000 - episode) / 5000 + 0.001
+            ounoise[i].scale = (EXPLORE_NOISE_START - EXPLORE_NOISE_FINAL) * max(0, EXPLORE_EPISODES - episode) / EXPLORE_EPISODES + EXPLORE_NOISE_FINAL
             ounoise[i].reset() 
 
         for steps in range(MAX_STEPS):
@@ -89,16 +93,14 @@ def train(env, agents, ounoise, memories):
             for i in range(num_agents):
                 action = agents[i].select_action(states[i], action_noise=ounoise[i])
                 actions.append(action.squeeze(0).numpy())            
-            
+
             # step
             states_next, rewards, done, _ = env.step(actions)
-            
+
             # save experiences
             for i in range(num_agents):
-                if done[i]:
-                    rewards[i] -= 10
                 memories[i].push(states[i], actions[i], rewards[i], states_next[i], done[i])
-                
+
             # learn
             v_loss, p_loss = train_agents(agents, memories)
 
@@ -114,17 +116,16 @@ def train(env, agents, ounoise, memories):
                     episode_rewards = episode_rewards / steps
                     episode_vlosses = episode_vlosses / steps
                     episode_plosses = episode_plosses / steps
-                
+
                 # logging
                 for a in range(num_agents):
                     writer.add_scalar('rewards/agent'+str(a),    episode_rewards[a],   episode)
                     writer.add_scalar('vlosses/agent'+str(a),    episode_vlosses[a],   episode)
                     writer.add_scalar('plosses/agent'+str(a),    episode_plosses[a],   episode)                 
                     writer.add_scalar('exploration/agent'+str(a)+' scale', ounoise[a].scale, episode)
-                    
+
                 break 
-                 
-                
+
     writer.close()   
 
 
@@ -142,19 +143,19 @@ def play(env, agents):
             for i in range(env.n):
                 action = agents[i].select_action(states[i])
                 actions.append(action.squeeze(0).numpy())
-            
+
             # step
             states, rewards, done, _ = env.step(actions)
             if any(done):
                 break
-            
+
             time.sleep(1.0/10)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()    
     parser.add_argument('-t', '--train', help='set to learn a policy', action="store_true")
-    parser.add_argument('--env', default='simple_tag_guided_1v2', type=str)
+    parser.add_argument('--env', default='simple_tag', type=str)
     parser.add_argument('--memory_size', default=1000000, type=int)
     args = parser.parse_args()
 
@@ -169,7 +170,7 @@ if __name__ == '__main__':
     # define the size of the input dimensions for the centralized critics (information from all agents)
     critic_in_size = 0
     critic_act_size = 0
-    
+
     for i in range(env.n):
         critic_in_size += env.observation_space[i].shape[0]
         critic_act_size += env.action_space[i].n
@@ -179,13 +180,12 @@ if __name__ == '__main__':
     agents = []
     noise = []
     memories = []    
-    
+
     for i in range(env.n):
         n_action = env.action_space[i].n
         state_size = env.observation_space[i].shape[0]
-        speed = 0.8 if env.agents[i].adversary else 1
 
-        agents.append(Agent(speed, GAMMA, TAU, 50, state_size, n_action, critic_in_size, critic_act_size) )
+        agents.append(Agent(GAMMA, TAU, 50, state_size, n_action, critic_in_size, critic_act_size) )
         noise.append(OUNoise(n_action))
         memories.append(ReplayMemory(args.memory_size))
 
