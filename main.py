@@ -155,8 +155,8 @@ def play(env, agents):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()    
     parser.add_argument('-t', '--train', help='set to learn a policy', action="store_true")
-    parser.add_argument('--env', default='simple_tag', type=str)
-    parser.add_argument('--memory_size', default=1000000, type=int)
+    parser.add_argument('--env', help='name of the environment', default='simple_tag', type=str)
+    parser.add_argument('--memory_size', help='size of the replay buffer', default=1000000, type=int)
     args = parser.parse_args()
 
     # init env
