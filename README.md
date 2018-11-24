@@ -1,7 +1,7 @@
 # multi-agent-learning
 Reinforcement Learning algorithm "multi-agent deep deterministic policy gradient" (MADDPG, [paper](https://arxiv.org/pdf/1706.02275.pdf)) is used to train openai's [multi-agent particle environments](https://github.com/openai/multiagent-particle-envs).
 
-![multi-agent environment simple_tag](https://github.com/paxx13/multi-agent-learning/tree/origin/models/simple_tag.gif "multi-agent environment simple_tag")
+![multi-agent environment simple_tag](https://github.com/paxx13/multi-agent-learning/blob/origin/models/simple_tag.GIF "multi-agent environment simple_tag")
 
 ## Intallation
 Dependencies with python 3.6
