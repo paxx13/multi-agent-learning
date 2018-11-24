@@ -35,7 +35,7 @@ optional arguments:
 ```
 
 ## Troubleshooting
-**Problem:** you encounter the following error `gym.error.Error: Cannot re-register id: MultiagentSimple-v0
+**Problem:** you encounter the following error `gym.error.Error: Cannot re-register id: MultiagentSimple-v0`
 **Solution:** you might need to change the ids to a different name in *\multiagent_envs\multiagent\__init__.py*
 
 ## Acknowledgements
