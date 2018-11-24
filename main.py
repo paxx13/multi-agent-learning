@@ -18,13 +18,13 @@ from multiagent_envs.make_env import make_env
 from collections import namedtuple
 
 MAX_STEPS = 100
-MAX_EPISODES = 10000
+MAX_EPISODES = 3000
 GAMMA = 0.96
 TAU = 0.01
 
 EXPLORE_NOISE_START = 0.1
 EXPLORE_NOISE_FINAL = 0.001
-EXPLORE_EPISODES = MAX_EPISODES  * 0.2
+EXPLORE_EPISODES = MAX_EPISODES  * 0.5
 
 BATCH_SIZE=64
 
